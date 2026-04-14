@@ -4,7 +4,7 @@ A comprehensive tool to predict the **environmental footprint** of video generat
 
 ## Overview
 
-This calculator predicts the complete environmental impact of video generation using machine learning models trained on real benchmark data from 15+ state-of-the-art video generation models. The system provides:
+This calculator predicts the complete environmental impact of video generation. **Training data:** ML is fit to benchmark measurements in [`ml/data/prepared_data.csv`](ml/data/prepared_data.csv), which aggregates runs from many underlying video systems (15+ distinct models appear in that dataset). **Using the tool:** you pick one of [**15 supported model names**](#supported-models) when you run a prediction; each name is mapped to DiT, U-Net, or hybrid in [`run.py`](run.py) `model_configs`. The system provides:
 
 - **Energy consumption** (Wh) with 95% confidence intervals
 - **Runtime duration** (seconds) with uncertainty quantification
@@ -31,21 +31,21 @@ This calculator predicts the complete environmental impact of video generation u
 - Automatic caching: First run trains models (~35s), subsequent runs load cache (~3s)
 
 ✅ **Architecture Support**
-- **DiT** (Diffusion Transformer): Sora, Mochi, WAN2.1, Veo, Latte
-- **U-Net**: AnimateDiff, Stable Video Diffusion, Pika, Lumiere
-- **Hybrid**: CogVideoX (5B, 2B)
+- **DiT** (Diffusion Transformer): e.g. Sora, Mochi, WAN2.1, VEO, Latte-XL
+- **U-Net**: e.g. AnimateDiff, Stable Video Diffusion, Pika, Lumiere
+- **Hybrid**: CogVideoX-5B, CogVideoX-2B
 
 ✅ **Production-Ready**
 - Input validation with safety floors
 - CLI with optional YAML (`--config`) and JSON or human output (`--output`)
-- `requirements.txt` and Docker (`Dockerfile`, `docker compose`)
+- `requirements.txt` and Docker (`Dockerfile`, `docker-compose.yml`; run with `docker compose`)
 - Uncertainty quantification (95% CI)
 
 ## Supported Models
 
 ### DiT Architecture (Diffusion Transformer)
 - **Sora** (10B params)
-- **Veo** (10B params)
+- **VEO** (10B params; use this exact spelling in YAML/CLI)
 - **Latte-XL** (0.67B params)
 - **WAN2.1-T2V-1.3B** (1.3B params)
 - **WAN2.1-T2V-14B** (14B params)
@@ -59,7 +59,6 @@ This calculator predicts the complete environmental impact of video generation u
 - **ModelScopeT2V** (1.7B params)
 - **Lumiere** (5B params)
 - **MagicVideo-V2** (1.5B params)
-- **Runway Gen-2** (1.5B params)
 
 ### Hybrid Architecture (Transformer + 3D VAE)
 - **CogVideoX-5B** (5B params)
@@ -305,16 +304,13 @@ The image uses `python:3.12-slim-bookworm`, installs `requirements.txt`, and run
 
 ### 5. Batch Processing (All Models)
 
-To compare all supported models at once:
+There is no batch script in the repository by default: `all_models.py` and `result_all_models.csv` are listed in `.gitignore` for optional local use. If you maintain your own `all_models.py`, you can run:
 
 ```bash
 python all_models.py
 ```
 
-This will:
-- Run predictions for all 17 models
-- Save results to `result_all_models.csv`
-- Use fixed parameters: 720p, 8s duration, 24fps, 50 steps, image input
+Typical behavior for such a script: run every model in [`run.py`](run.py) `model_configs`, write a CSV (for example `result_all_models.csv`), and use fixed scenario parameters you define in the script.
 
 ## Advanced Usage
 
@@ -328,11 +324,11 @@ Edit [`run.py`](run.py), add to `model_configs` dict:
 
 ### Changing Default Safety Floors
 
-Edit [`ml/compute_wh.py`](ml/compute_wh.py#L103):
+Edit [`ml/compute_wh.py`](ml/compute_wh.py) near the top (constants `MIN_WH` and `MIN_RUN_TIME`):
 
 ```python
-MIN_WH = 2.0         # Minimum energy (Wh)
-MIN_run_time = 4.0   # Minimum runtime (seconds)
+MIN_WH = 2.0          # Minimum energy (Wh)
+MIN_RUN_TIME = 4.0    # Minimum runtime (seconds)
 ```
 
 ### Re-training Models
@@ -341,7 +337,7 @@ Delete cached models to force retraining:
 
 ```bash
 rm ml/model/best_models_*.joblib
-python run.py  # Will retrain (~35 seconds)
+python run.py --config input.yaml --output human   # retrains on first use (~35 seconds)
 ```
 
 ## Technical Details
@@ -419,7 +415,7 @@ python run.py  # Will retrain (~35 seconds)
 
 **1. Data Preparation** ([`ml/data/prepared_data.csv`](ml/data/prepared_data.csv))
 
-The training dataset contains benchmark measurements from 15+ video generation models:
+The training dataset aggregates benchmark measurements from many video generation models (15+ in the table); the selectable names in the CLI are the 15 entries in [`run.py`](run.py) `model_configs`.
 
 | Column | Description | Example |
 |--------|-------------|---------|
@@ -484,10 +480,10 @@ if steps <= 0 or res <= 0 or frames <= 0 or params <= 0:
 2. Convert to DataFrame with column names (avoids StandardScaler warnings)
 3. Load cached scaler and transform features
 4. Predict with best model for architecture
-5. Apply safety floors: `max(MIN_WH=2.0, prediction)`, `max(MIN_run_time=4.0, prediction)`
+5. Apply safety floors: `max(MIN_WH=2.0, prediction)`, `max(MIN_RUN_TIME=4.0, prediction)`
 6. Calculate uncertainty: `margin_95 = 1.96 × RMSE`
 
-**4. Carbon Emissions** ([`ml/compute_wh.py:emission_factor`](ml/compute_wh.py#L8))
+**4. Carbon Emissions** ([`emission_factor` in `ml/compute_wh.py`](ml/compute_wh.py))
 
 ```python
 # Constants
@@ -537,12 +533,12 @@ worst_case = prediction + margin_95
 ## Project Structure
 
 ```
-final_prog/
+./
+├── Dockerfile                         # Image: python:3.12-slim-bookworm, ENTRYPOINT python run.py
+├── docker-compose.yml                 # Service videogen: build ., mount . → /app
 ├── run.py                             # Main entry point
-├── all_models.py                      # Batch processing script (all models)
-├── input.yaml                         # User configuration
+├── input.yaml                         # Example user configuration
 ├── utils.py                           # YAML/CSV utilities, validation
-├── result_all_models.csv             # Batch results output
 ├── readme.md                          # This file
 │
 └── ml/                                # Machine learning modules
@@ -580,8 +576,7 @@ final_prog/
 | File | Purpose |
 |------|---------|
 | [`run.py`](run.py) | CLI: argparse, optional `--config`, `--output` json or human |
-| [`all_models.py`](all_models.py) | Batch processing: runs all models, exports CSV |
-| [`input.yaml`](input.yaml) | User configuration: model, resolution, duration, etc. |
+| [`input.yaml`](input.yaml) | Example configuration: model, resolution, duration, etc. |
 | [`utils.py`](utils.py) | Helper functions: YAML loading, validation, CSV export |
 | [`ml/compute_wh.py`](ml/compute_wh.py) | Orchestrates energy + runtime prediction, calculates carbon |
 | [`ml/ml_wh.py`](ml/ml_wh.py) | VideoEnergyPredictor class (6-algorithm comparison) |
@@ -604,7 +599,7 @@ final_prog/
 **Force Retrain:**
 ```bash
 rm ml/model/best_models_*.joblib
-python run.py
+python run.py --config input.yaml --output human
 ```
 
 ## Performance Benchmarks
@@ -624,13 +619,13 @@ python run.py
 | First run (with training) | ~35 seconds |
 | Subsequent runs (cached) | ~3 seconds |
 | Single prediction | <0.1 seconds |
-| Batch (17 models) | ~5 seconds |
+| Batch (15 models, cached) | on the order of seconds |
 
 ## Limitations & Assumptions
 
 ### Data Limitations
 - **Training data size**: Limited benchmark measurements (~20-150 samples per architecture)
-- **Model coverage**: 15+ models, may not generalize to completely new architectures
+- **Model coverage**: Training data spans many benchmarked systems; the CLI only lists 15 names. Either may not generalize to completely new architectures.
 - **Parameter ranges**: Predictions most accurate within training distribution
   - Steps: 20-100
   - Resolution: 240p-1080p
@@ -656,9 +651,9 @@ python run.py
 
 **1. Model not found:**
 ```
-ValueError: Error, model can't be handled or is badly written
+Model can't be handled or is badly written
 ```
-→ Check model name in `input.yaml` matches exactly (case-sensitive)
+(JSON mode: same text inside `"error"`.) Check the model name matches [`run.py`](run.py) `model_configs` exactly (case-sensitive), e.g. **VEO** not `Veo`.
 
 **2. Missing data files:**
 ```
@@ -700,7 +695,7 @@ print(f"R²: {best_metrics['r2']:.3f}")
 | **Carbon** | Operational (electricity) + Embodied (GPU manufacturing) |
 | **Water** | Data center cooling water usage (0.35 L/kWh) |
 | **Safety** | Minimum floors: 2.0 Wh, 4.0 s (based on data minimum) |
-| **Scalability** | Supports 17+ video generation models across 3 architectures |
+| **Scalability** | Supports 15 video generation models across 3 architectures |
 
 ## Citation
 
