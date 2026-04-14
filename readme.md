@@ -37,9 +37,9 @@ This calculator predicts the complete environmental impact of video generation u
 
 ✅ **Production-Ready**
 - Input validation with safety floors
-- YAML configuration
+- CLI with optional YAML (`--config`) and JSON or human output (`--output`)
+- `requirements.txt` and Docker (`Dockerfile`, `docker compose`)
 - Uncertainty quantification (95% CI)
-- Batch processing support (`all_models.py`)
 
 ## Supported Models
 
@@ -68,55 +68,169 @@ This calculator predicts the complete environmental impact of video generation u
 ## Installation
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.12+ recommended (matches `Dockerfile`)
 - pip
 
-### Setup
+### Setup (virtual environment)
 
 ```bash
-# Clone or navigate to project directory
-cd final_prog
+cd Calculator-VideoGen
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# Install dependencies
-pip install pandas numpy scikit-learn pyyaml joblib polars
-
-# Verify data files exist
-# - ml/data/prepared_data.csv
-# - ml/data/carbone_kwh_country.csv
+pip install -r requirements.txt
 ```
+
+Pinned dependencies include `scikit-learn==1.8.0`. Verify data files exist:
+
+- `ml/data/prepared_data.csv`
+- `ml/data/carbone_kwh_country.csv`
+
+### scikit-learn upgrade and cached models
+
+If you change the scikit-learn version (or see unpickling version warnings), delete generated caches and let the app retrain:
+
+```bash
+rm -f ml/model/*.joblib
+python run.py --config input.yaml --output human
+```
+
+First run after deletion trains models (~35s); later runs load from `ml/model/`.
 
 ## Quick Start
 
-### 1. Configure Input
+### 1. Optional YAML defaults
 
-Edit [`input.yaml`](input.yaml) with your video generation parameters:
+You can keep a file such as [`input.yaml`](input.yaml) and override any field from the CLI:
 
 ```yaml
-model: CogVideoX-5B              # Model name (see supported models)
-duration: 2                      # Video duration in seconds
-resolution_height: 480           # Height in pixels
-resolution_witdh: 720           # Width in pixels (note: typo preserved for compatibility)
-fps: 24                         # Frames per second
-denoising_steps: 50             # Number of denoising steps
-input_type: text                # "text" or "image" (default: text)
-country: France                 # Country for carbon intensity factor
+model: CogVideoX-5B
+duration: 2
+resolution_height: 480
+resolution_witdh: 720
+fps: 24
+denoising_steps: 50
+input_type: text
+country: France
 ```
 
-**Parameter Guidelines:**
-- `duration`: 1-10 seconds (typical range)
-- `resolution_height` × `resolution_witdh`: 480×720 to 1080×1920
-- `fps`: 8, 16, 24, 30 (common values)
-- `denoising_steps`: 20-100 (50 is optimal for most models)
-- `input_type`: "text" (text-to-video) or "image" (image-to-video)
-- `total_frames`: Auto-calculated as `duration × fps`
+#### Parameter guidelines
 
-### 2. Run Single Prediction
+These apply whether you use YAML, CLI flags, or Docker:
+
+- **`model`:** Must match a [supported model](#supported-models) name exactly (case-sensitive).
+- **`duration`:** Typical range 1–10 seconds.
+- **`resolution_height` × `resolution_witdh`:** Common ranges roughly 480×720 up to 1080×1920 (historical key name `resolution_witdh` is kept for compatibility).
+- **`fps`:** Common values include 8, 16, 24, 30.
+- **`denoising_steps`:** Often 20–100; ~50 is a reasonable default for many models.
+- **`input_type`:** `text` (text-to-video) or `image` (image-to-video). Defaults to `text` if omitted.
+- **`country`:** Used for grid carbon intensity; must match or approximate a row in `ml/data/carbone_kwh_country.csv` (unknown countries use a global average).
+- **`total_frames`:** Not a separate input; computed as `duration × fps`.
+
+### 2. Run from the CLI
+
+All required parameters can be passed as flags (kebab-case). If you use `--config`, YAML is loaded first and any flag you pass overrides that key.
+
+**Human-readable output (default):**
 
 ```bash
-python run.py
+python run.py \
+  --config input.yaml \
+  --output human
 ```
 
-### 3. Output
+**Machine-readable JSON (one minified line on stdout):**
+
+```bash
+python run.py \
+  --config input.yaml \
+  --output json
+```
+
+#### Example without YAML (all required flags)
+
+```bash
+python run.py \
+  --model "CogVideoX-5B" \
+  --duration 5 \
+  --resolution-height 1280 \
+  --resolution-witdh 720 \
+  --fps 24 \
+  --denoising-steps 40 \
+  --input-type image \
+  --country China \
+  --output json
+```
+
+Flags: `--model`, `--duration`, `--resolution-height`, `--resolution-witdh`, `--fps`, `--denoising-steps`, `--input-type` (`text`|`image`), `--country`, `--config`, `--output` (`human`|`json`).
+
+### 3. Docker
+
+The examples below use the same layout as local runs: the project directory is mounted at `/app` so `ml/data` and `ml/model` stay in sync with the host (see [Parameter guidelines](#parameter-guidelines)).
+
+#### With `--config` (e.g. `input.yaml`)
+
+**Docker Compose:**
+
+```bash
+docker compose build videogen
+docker compose run --rm videogen -- \
+  --config input.yaml \
+  --output json
+```
+
+**Docker only (without Compose):** from the repository root, build the [`Dockerfile`](Dockerfile) then run:
+
+```bash
+docker build -t videogen-calculator .
+docker run --rm \
+  -v "$(pwd):/app" \
+  -w /app \
+  videogen-calculator \
+  --config input.yaml \
+  --output json
+```
+
+#### Same parameters as the [CLI example without YAML](#example-without-yaml-all-required-flags) (no `--config`)
+
+**Docker Compose** (equivalent flags to `python run.py --model "CogVideoX-5B" … --output json`):
+
+```bash
+docker compose run --rm videogen -- \
+  --model "CogVideoX-5B" \
+  --duration 5 \
+  --resolution-height 1280 \
+  --resolution-witdh 720 \
+  --fps 24 \
+  --denoising-steps 40 \
+  --input-type image \
+  --country China \
+  --output json
+```
+
+**Docker only:**
+
+```bash
+docker run --rm \
+  -v "$(pwd):/app" \
+  -w /app \
+  videogen-calculator \
+  --model "CogVideoX-5B" \
+  --duration 5 \
+  --resolution-height 1280 \
+  --resolution-witdh 720 \
+  --fps 24 \
+  --denoising-steps 40 \
+  --input-type image \
+  --country China \
+  --output json
+```
+
+Build the image first (`docker compose build videogen` or `docker build -t videogen-calculator .`) if you have not already. Replace the image name `videogen-calculator` with any tag you prefer. Pass CLI flags after `--` (Compose) or after the image name (`docker run`); they are forwarded to `python run.py` via `ENTRYPOINT`.
+
+The image uses `python:3.12-slim-bookworm`, installs `requirements.txt`, and runs as a non-root user with `ENTRYPOINT ["python", "run.py"]`.
+
+### 4. Output
 
 **Console Output:**
 ```
@@ -189,7 +303,7 @@ python run.py
 }
 ```
 
-### 4. Batch Processing (All Models)
+### 5. Batch Processing (All Models)
 
 To compare all supported models at once:
 
@@ -465,13 +579,13 @@ final_prog/
 
 | File | Purpose |
 |------|---------|
-| [`run.py`](run.py) | Main script: loads config, runs prediction, displays results |
+| [`run.py`](run.py) | CLI: argparse, optional `--config`, `--output` json or human |
 | [`all_models.py`](all_models.py) | Batch processing: runs all models, exports CSV |
 | [`input.yaml`](input.yaml) | User configuration: model, resolution, duration, etc. |
 | [`utils.py`](utils.py) | Helper functions: YAML loading, validation, CSV export |
 | [`ml/compute_wh.py`](ml/compute_wh.py) | Orchestrates energy + runtime prediction, calculates carbon |
 | [`ml/ml_wh.py`](ml/ml_wh.py) | VideoEnergyPredictor class (6-algorithm comparison) |
-| [`ml/ml_runtime.py`](ml/ml_runtime.py) | Videorun_timePredictor class (6-algorithm comparison) |
+| [`ml/ml_runtime.py`](ml/ml_runtime.py) | `VideoRuntimePredictor` (6-algorithm comparison) |
 | `ml/data/prepared_data.csv` | Training dataset (benchmark measurements) |
 | `ml/data/carbone_kwh_country.csv` | Country-specific carbon intensity factors |
 
