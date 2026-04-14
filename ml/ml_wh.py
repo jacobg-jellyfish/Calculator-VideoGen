@@ -10,10 +10,10 @@ import logging
 from typing import Any
 
 import joblib
-import numpy as np
+import pandas as pd
 
 from ml.base_predictor import BaseSklearnArchitecturePredictor
-from ml.prediction_params import MlPredictionParams, feature_value_list
+from ml.prediction_params import FEATURE_ORDER, MlPredictionParams, feature_value_list
 from ml.regressor_eval import collect_architecture_results, make_training_fold
 
 logger = logging.getLogger(__name__)
@@ -63,8 +63,9 @@ class VideoEnergyPredictor(BaseSklearnArchitecturePredictor):
             scaler = joblib.load(f"./ml/model/scaler_wh_{arch}.joblib")
             best = self.best_models[arch]
             res_arch = res if arch == "dit" else REFS_RES[arch]
-            features = np.array([feature_value_list(params_in, res_arch)])
-            scaled = scaler.transform(features)
+            vec = feature_value_list(params_in, res_arch)
+            row = pd.DataFrame([vec], columns=list(FEATURE_ORDER))
+            scaled = scaler.transform(row)
             pred = float(model.predict(scaled)[0])
             pred = max(0.0, pred)
             adj = _resolution_energy_adjustment(arch, res, res_arch, params_in.params)

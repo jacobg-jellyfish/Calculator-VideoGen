@@ -87,10 +87,12 @@ Pinned dependencies include `scikit-learn==1.8.0`. Verify data files exist:
 
 ### scikit-learn upgrade and cached models
 
-If you change the scikit-learn version (or see unpickling version warnings), delete generated caches and let the app retrain:
+If you change the scikit-learn version (or see unpickling version warnings), delete the cached joblib artifacts and let the app retrain. **Do not use** `rm ml/model/*.joblib` — it removes every file in that directory at once. Use explicit globs instead:
 
 ```bash
-rm -f ml/model/*.joblib
+rm -f ml/model/best_models_wh_*.joblib ml/model/best_models_run_time_*.joblib \
+  ml/model/best_model_wh_*.joblib ml/model/best_model_run_time_*.joblib \
+  ml/model/scaler_wh_*.joblib ml/model/scaler_run_time_*.joblib
 python run.py --config input.yaml --output human
 ```
 
@@ -173,7 +175,7 @@ The examples below use the same layout as local runs: the project directory is m
 
 ```bash
 docker compose build videogen
-docker compose run --rm videogen -- \
+docker compose run --rm videogen \
   --config input.yaml \
   --output json
 ```
@@ -195,7 +197,7 @@ docker run --rm \
 **Docker Compose** (equivalent flags to `python run.py --model "CogVideoX-5B" … --output json`):
 
 ```bash
-docker compose run --rm videogen -- \
+docker compose run --rm videogen \
   --model "CogVideoX-5B" \
   --duration 5 \
   --resolution-height 1280 \
@@ -225,7 +227,7 @@ docker run --rm \
   --output json
 ```
 
-Build the image first (`docker compose build videogen` or `docker build -t videogen-calculator .`) if you have not already. Replace the image name `videogen-calculator` with any tag you prefer. Pass CLI flags after `--` (Compose) or after the image name (`docker run`); they are forwarded to `python run.py` via `ENTRYPOINT`.
+Build the image first (`docker compose build videogen` or `docker build -t videogen-calculator .`) if you have not already. Replace the image name `videogen-calculator` with any tag you prefer. With Compose, pass `run.py` arguments **directly after the service name** `videogen` (do **not** put `--` there: it would be forwarded to Python and break argparse). With `docker run`, pass the same arguments after the image name. Both use `ENTRYPOINT ["python", "run.py"]`.
 
 The image uses `python:3.12-slim-bookworm`, installs `requirements.txt`, and runs as a non-root user with `ENTRYPOINT ["python", "run.py"]`.
 
