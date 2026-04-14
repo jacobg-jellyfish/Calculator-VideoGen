@@ -4,7 +4,7 @@ A comprehensive tool to predict the **environmental footprint** of video generat
 
 ## Overview
 
-This calculator predicts the complete environmental impact of video generation using machine learning models trained on real benchmark data from 15+ state-of-the-art video generation models. The system provides:
+This calculator predicts the complete environmental impact of video generation. **Training data:** ML is fit to benchmark measurements in [`ml/data/prepared_data.csv`](ml/data/prepared_data.csv), which aggregates runs from many underlying video systems (15+ distinct models appear in that dataset). **Using the tool:** you pick one of [**15 supported model names**](#supported-models) when you run a prediction; each name is mapped to DiT, U-Net, or hybrid in [`run.py`](run.py) `model_configs`. The system provides:
 
 - **Energy consumption** (Wh) with 95% confidence intervals
 - **Runtime duration** (seconds) with uncertainty quantification
@@ -31,21 +31,21 @@ This calculator predicts the complete environmental impact of video generation u
 - Automatic caching: First run trains models (~35s), subsequent runs load cache (~3s)
 
 ✅ **Architecture Support**
-- **DiT** (Diffusion Transformer): Sora, Mochi, WAN2.1, Veo, Latte
-- **U-Net**: AnimateDiff, Stable Video Diffusion, Pika, Lumiere
-- **Hybrid**: CogVideoX (5B, 2B)
+- **DiT** (Diffusion Transformer): e.g. Sora, Mochi, WAN2.1, VEO, Latte-XL
+- **U-Net**: e.g. AnimateDiff, Stable Video Diffusion, Pika, Lumiere
+- **Hybrid**: CogVideoX-5B, CogVideoX-2B
 
 ✅ **Production-Ready**
 - Input validation with safety floors
-- YAML configuration
+- CLI with optional YAML (`--config`) and JSON or human output (`--output`)
+- `requirements.txt` and Docker (`Dockerfile`, `docker-compose.yml`; run with `docker compose`)
 - Uncertainty quantification (95% CI)
-- Batch processing support (`all_models.py`)
 
 ## Supported Models
 
 ### DiT Architecture (Diffusion Transformer)
 - **Sora** (10B params)
-- **Veo** (10B params)
+- **VEO** (10B params; use this exact spelling in YAML/CLI)
 - **Latte-XL** (0.67B params)
 - **WAN2.1-T2V-1.3B** (1.3B params)
 - **WAN2.1-T2V-14B** (14B params)
@@ -59,7 +59,6 @@ This calculator predicts the complete environmental impact of video generation u
 - **ModelScopeT2V** (1.7B params)
 - **Lumiere** (5B params)
 - **MagicVideo-V2** (1.5B params)
-- **Runway Gen-2** (1.5B params)
 
 ### Hybrid Architecture (Transformer + 3D VAE)
 - **CogVideoX-5B** (5B params)
@@ -68,55 +67,171 @@ This calculator predicts the complete environmental impact of video generation u
 ## Installation
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.12+ recommended (matches `Dockerfile`)
 - pip
 
-### Setup
+### Setup (virtual environment)
 
 ```bash
-# Clone or navigate to project directory
-cd final_prog
+cd Calculator-VideoGen
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# Install dependencies
-pip install pandas numpy scikit-learn pyyaml joblib polars
-
-# Verify data files exist
-# - ml/data/prepared_data.csv
-# - ml/data/carbone_kwh_country.csv
+pip install -r requirements.txt
 ```
+
+Pinned dependencies include `scikit-learn==1.8.0`. Verify data files exist:
+
+- `ml/data/prepared_data.csv`
+- `ml/data/carbone_kwh_country.csv`
+
+### scikit-learn upgrade and cached models
+
+If you change the scikit-learn version (or see unpickling version warnings), delete the cached joblib artifacts and let the app retrain. **Do not use** `rm ml/model/*.joblib` — it removes every file in that directory at once. Use explicit globs instead:
+
+```bash
+rm -f ml/model/best_models_wh_*.joblib ml/model/best_models_run_time_*.joblib \
+  ml/model/best_model_wh_*.joblib ml/model/best_model_run_time_*.joblib \
+  ml/model/scaler_wh_*.joblib ml/model/scaler_run_time_*.joblib
+python run.py --config input.yaml --output human
+```
+
+First run after deletion trains models (~35s); later runs load from `ml/model/`.
 
 ## Quick Start
 
-### 1. Configure Input
+### 1. Optional YAML defaults
 
-Edit [`input.yaml`](input.yaml) with your video generation parameters:
+You can keep a file such as [`input.yaml`](input.yaml) and override any field from the CLI:
 
 ```yaml
-model: CogVideoX-5B              # Model name (see supported models)
-duration: 2                      # Video duration in seconds
-resolution_height: 480           # Height in pixels
-resolution_witdh: 720           # Width in pixels (note: typo preserved for compatibility)
-fps: 24                         # Frames per second
-denoising_steps: 50             # Number of denoising steps
-input_type: text                # "text" or "image" (default: text)
-country: France                 # Country for carbon intensity factor
+model: CogVideoX-5B
+duration: 2
+resolution_height: 480
+resolution_witdh: 720
+fps: 24
+denoising_steps: 50
+input_type: text
+country: France
 ```
 
-**Parameter Guidelines:**
-- `duration`: 1-10 seconds (typical range)
-- `resolution_height` × `resolution_witdh`: 480×720 to 1080×1920
-- `fps`: 8, 16, 24, 30 (common values)
-- `denoising_steps`: 20-100 (50 is optimal for most models)
-- `input_type`: "text" (text-to-video) or "image" (image-to-video)
-- `total_frames`: Auto-calculated as `duration × fps`
+#### Parameter guidelines
 
-### 2. Run Single Prediction
+These apply whether you use YAML, CLI flags, or Docker:
+
+- **`model`:** Must match a [supported model](#supported-models) name exactly (case-sensitive).
+- **`duration`:** Typical range 1–10 seconds.
+- **`resolution_height` × `resolution_witdh`:** Common ranges roughly 480×720 up to 1080×1920 (historical key name `resolution_witdh` is kept for compatibility).
+- **`fps`:** Common values include 8, 16, 24, 30.
+- **`denoising_steps`:** Often 20–100; ~50 is a reasonable default for many models.
+- **`input_type`:** `text` (text-to-video) or `image` (image-to-video). Defaults to `text` if omitted.
+- **`country`:** Used for grid carbon intensity; must match or approximate a row in `ml/data/carbone_kwh_country.csv` (unknown countries use a global average).
+- **`total_frames`:** Not a separate input; computed as `duration × fps`.
+
+### 2. Run from the CLI
+
+All required parameters can be passed as flags (kebab-case). If you use `--config`, YAML is loaded first and any flag you pass overrides that key.
+
+**Human-readable output (default):**
 
 ```bash
-python run.py
+python run.py \
+  --config input.yaml \
+  --output human
 ```
 
-### 3. Output
+**Machine-readable JSON (one minified line on stdout):**
+
+```bash
+python run.py \
+  --config input.yaml \
+  --output json
+```
+
+#### Example without YAML (all required flags)
+
+```bash
+python run.py \
+  --model "CogVideoX-5B" \
+  --duration 5 \
+  --resolution-height 1280 \
+  --resolution-witdh 720 \
+  --fps 24 \
+  --denoising-steps 40 \
+  --input-type image \
+  --country China \
+  --output json
+```
+
+Flags: `--model`, `--duration`, `--resolution-height`, `--resolution-witdh`, `--fps`, `--denoising-steps`, `--input-type` (`text`|`image`), `--country`, `--config`, `--output` (`human`|`json`).
+
+### 3. Docker
+
+The examples below use the same layout as local runs: the project directory is mounted at `/app` so `ml/data` and `ml/model` stay in sync with the host (see [Parameter guidelines](#parameter-guidelines)).
+
+#### With `--config` (e.g. `input.yaml`)
+
+**Docker Compose:**
+
+```bash
+docker compose build videogen
+docker compose run --rm videogen \
+  --config input.yaml \
+  --output json
+```
+
+**Docker only (without Compose):** from the repository root, build the [`Dockerfile`](Dockerfile) then run:
+
+```bash
+docker build -t videogen-calculator .
+docker run --rm \
+  -v "$(pwd):/app" \
+  -w /app \
+  videogen-calculator \
+  --config input.yaml \
+  --output json
+```
+
+#### Same parameters as the [CLI example without YAML](#example-without-yaml-all-required-flags) (no `--config`)
+
+**Docker Compose** (equivalent flags to `python run.py --model "CogVideoX-5B" … --output json`):
+
+```bash
+docker compose run --rm videogen \
+  --model "CogVideoX-5B" \
+  --duration 5 \
+  --resolution-height 1280 \
+  --resolution-witdh 720 \
+  --fps 24 \
+  --denoising-steps 40 \
+  --input-type image \
+  --country China \
+  --output json
+```
+
+**Docker only:**
+
+```bash
+docker run --rm \
+  -v "$(pwd):/app" \
+  -w /app \
+  videogen-calculator \
+  --model "CogVideoX-5B" \
+  --duration 5 \
+  --resolution-height 1280 \
+  --resolution-witdh 720 \
+  --fps 24 \
+  --denoising-steps 40 \
+  --input-type image \
+  --country China \
+  --output json
+```
+
+Build the image first (`docker compose build videogen` or `docker build -t videogen-calculator .`) if you have not already. Replace the image name `videogen-calculator` with any tag you prefer. With Compose, pass `run.py` arguments **directly after the service name** `videogen` (do **not** put `--` there: it would be forwarded to Python and break argparse). With `docker run`, pass the same arguments after the image name. Both use `ENTRYPOINT ["python", "run.py"]`.
+
+The image uses `python:3.12-slim-bookworm`, installs `requirements.txt`, and runs as a non-root user with `ENTRYPOINT ["python", "run.py"]`.
+
+### 4. Output
 
 **Console Output:**
 ```
@@ -189,18 +304,15 @@ python run.py
 }
 ```
 
-### 4. Batch Processing (All Models)
+### 5. Batch Processing (All Models)
 
-To compare all supported models at once:
+There is no batch script in the repository by default: `all_models.py` and `result_all_models.csv` are listed in `.gitignore` for optional local use. If you maintain your own `all_models.py`, you can run:
 
 ```bash
 python all_models.py
 ```
 
-This will:
-- Run predictions for all 17 models
-- Save results to `result_all_models.csv`
-- Use fixed parameters: 720p, 8s duration, 24fps, 50 steps, image input
+Typical behavior for such a script: run every model in [`run.py`](run.py) `model_configs`, write a CSV (for example `result_all_models.csv`), and use fixed scenario parameters you define in the script.
 
 ## Advanced Usage
 
@@ -214,11 +326,11 @@ Edit [`run.py`](run.py), add to `model_configs` dict:
 
 ### Changing Default Safety Floors
 
-Edit [`ml/compute_wh.py`](ml/compute_wh.py#L103):
+Edit [`ml/compute_wh.py`](ml/compute_wh.py) near the top (constants `MIN_WH` and `MIN_RUN_TIME`):
 
 ```python
-MIN_WH = 2.0         # Minimum energy (Wh)
-MIN_run_time = 4.0   # Minimum runtime (seconds)
+MIN_WH = 2.0          # Minimum energy (Wh)
+MIN_RUN_TIME = 4.0    # Minimum runtime (seconds)
 ```
 
 ### Re-training Models
@@ -227,7 +339,7 @@ Delete cached models to force retraining:
 
 ```bash
 rm ml/model/best_models_*.joblib
-python run.py  # Will retrain (~35 seconds)
+python run.py --config input.yaml --output human   # retrains on first use (~35 seconds)
 ```
 
 ## Technical Details
@@ -305,7 +417,7 @@ python run.py  # Will retrain (~35 seconds)
 
 **1. Data Preparation** ([`ml/data/prepared_data.csv`](ml/data/prepared_data.csv))
 
-The training dataset contains benchmark measurements from 15+ video generation models:
+The training dataset aggregates benchmark measurements from many video generation models (15+ in the table); the selectable names in the CLI are the 15 entries in [`run.py`](run.py) `model_configs`.
 
 | Column | Description | Example |
 |--------|-------------|---------|
@@ -370,10 +482,10 @@ if steps <= 0 or res <= 0 or frames <= 0 or params <= 0:
 2. Convert to DataFrame with column names (avoids StandardScaler warnings)
 3. Load cached scaler and transform features
 4. Predict with best model for architecture
-5. Apply safety floors: `max(MIN_WH=2.0, prediction)`, `max(MIN_run_time=4.0, prediction)`
+5. Apply safety floors: `max(MIN_WH=2.0, prediction)`, `max(MIN_RUN_TIME=4.0, prediction)`
 6. Calculate uncertainty: `margin_95 = 1.96 × RMSE`
 
-**4. Carbon Emissions** ([`ml/compute_wh.py:emission_factor`](ml/compute_wh.py#L8))
+**4. Carbon Emissions** ([`emission_factor` in `ml/compute_wh.py`](ml/compute_wh.py))
 
 ```python
 # Constants
@@ -423,12 +535,12 @@ worst_case = prediction + margin_95
 ## Project Structure
 
 ```
-final_prog/
+./
+├── Dockerfile                         # Image: python:3.12-slim-bookworm, ENTRYPOINT python run.py
+├── docker-compose.yml                 # Service videogen: build ., mount . → /app
 ├── run.py                             # Main entry point
-├── all_models.py                      # Batch processing script (all models)
-├── input.yaml                         # User configuration
+├── input.yaml                         # Example user configuration
 ├── utils.py                           # YAML/CSV utilities, validation
-├── result_all_models.csv             # Batch results output
 ├── readme.md                          # This file
 │
 └── ml/                                # Machine learning modules
@@ -465,13 +577,12 @@ final_prog/
 
 | File | Purpose |
 |------|---------|
-| [`run.py`](run.py) | Main script: loads config, runs prediction, displays results |
-| [`all_models.py`](all_models.py) | Batch processing: runs all models, exports CSV |
-| [`input.yaml`](input.yaml) | User configuration: model, resolution, duration, etc. |
+| [`run.py`](run.py) | CLI: argparse, optional `--config`, `--output` json or human |
+| [`input.yaml`](input.yaml) | Example configuration: model, resolution, duration, etc. |
 | [`utils.py`](utils.py) | Helper functions: YAML loading, validation, CSV export |
 | [`ml/compute_wh.py`](ml/compute_wh.py) | Orchestrates energy + runtime prediction, calculates carbon |
 | [`ml/ml_wh.py`](ml/ml_wh.py) | VideoEnergyPredictor class (6-algorithm comparison) |
-| [`ml/ml_runtime.py`](ml/ml_runtime.py) | Videorun_timePredictor class (6-algorithm comparison) |
+| [`ml/ml_runtime.py`](ml/ml_runtime.py) | `VideoRuntimePredictor` (6-algorithm comparison) |
 | `ml/data/prepared_data.csv` | Training dataset (benchmark measurements) |
 | `ml/data/carbone_kwh_country.csv` | Country-specific carbon intensity factors |
 
@@ -490,7 +601,7 @@ final_prog/
 **Force Retrain:**
 ```bash
 rm ml/model/best_models_*.joblib
-python run.py
+python run.py --config input.yaml --output human
 ```
 
 ## Performance Benchmarks
@@ -510,13 +621,13 @@ python run.py
 | First run (with training) | ~35 seconds |
 | Subsequent runs (cached) | ~3 seconds |
 | Single prediction | <0.1 seconds |
-| Batch (17 models) | ~5 seconds |
+| Batch (15 models, cached) | on the order of seconds |
 
 ## Limitations & Assumptions
 
 ### Data Limitations
 - **Training data size**: Limited benchmark measurements (~20-150 samples per architecture)
-- **Model coverage**: 15+ models, may not generalize to completely new architectures
+- **Model coverage**: Training data spans many benchmarked systems; the CLI only lists 15 names. Either may not generalize to completely new architectures.
 - **Parameter ranges**: Predictions most accurate within training distribution
   - Steps: 20-100
   - Resolution: 240p-1080p
@@ -542,9 +653,9 @@ python run.py
 
 **1. Model not found:**
 ```
-ValueError: Error, model can't be handled or is badly written
+Model can't be handled or is badly written
 ```
-→ Check model name in `input.yaml` matches exactly (case-sensitive)
+(JSON mode: same text inside `"error"`.) Check the model name matches [`run.py`](run.py) `model_configs` exactly (case-sensitive), e.g. **VEO** not `Veo`.
 
 **2. Missing data files:**
 ```
@@ -586,7 +697,7 @@ print(f"R²: {best_metrics['r2']:.3f}")
 | **Carbon** | Operational (electricity) + Embodied (GPU manufacturing) |
 | **Water** | Data center cooling water usage (0.35 L/kWh) |
 | **Safety** | Minimum floors: 2.0 Wh, 4.0 s (based on data minimum) |
-| **Scalability** | Supports 17+ video generation models across 3 architectures |
+| **Scalability** | Supports 15 video generation models across 3 architectures |
 
 ## Citation
 
